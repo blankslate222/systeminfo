@@ -51,14 +51,32 @@ func Processinfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func HostMachineinfo(w http.ResponseWriter, r *http.Request) {
-
+	sess := GetConnection()
+	defer sess.Close()
+	collection := sess.DB("sysinfo").C("machineinfo")
+	length, _ := collection.Count()
+	result := make([]interface{}, length)
+	qry := collection.Find(bson.M{})
+	// fmt.Println(qry)
+	err := qry.All(&result)
+	if err != nil {
+		fmt.Println("error in mongo find query")
+	}
+	//fmt.Println(result)
+	j, _ := json.Marshal(result)
+	//fmt.Fprint(w, j)
+	w.WriteHeader(http.StatusOK)
+	w.Write(j)
 }
 
 func Generateinfo(w http.ResponseWriter, r *http.Request) {
 	progs := DetectInstalledPrograms()
-	fmt.Println(progs)
+
 	procs := GetProcessInfo()
-	if progs == true && procs == true {
+
+	hostinfo := DetectHostMachineInfo()
+
+	if progs == true && procs == true && hostinfo == true {
 		w.WriteHeader(http.StatusOK)
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)

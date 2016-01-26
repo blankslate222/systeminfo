@@ -1,9 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"net/http"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/shirou/gopsutil/cpu"
@@ -54,23 +58,76 @@ func DetectInstalledPrograms() bool {
 			if strings.TrimSpace(version) != "" {
 				doc.Version = version
 			}
+			if name == "Google Chrome" {
+				// bad way
+				latest := getLatestBrowserVersion("Chrome")
+				doc.LatestVersion = latest
+				re := regexp.MustCompile("[0-9]+")
+				insver := re.FindAllString(version, -1)
+				chrom_ver := strings.Join(insver, "")[0:2]
+				f1, _ := strconv.Atoi(chrom_ver)
+				latver := re.FindAllString(latest, -1)
+				f2, _ := strconv.Atoi(strings.Join(latver, ""))
+				doc.NeedsUpdate = f2 > f1
+			}
 			err := collection.Insert(doc)
 			if err != nil {
 				fmt.Printf("Can't insert document: %v\n", err)
 			}
 		}
 	}
-	//fmt.Println(hostinfo)
+
+	javainfo := getJavaDetails()
+	err = collection.Insert(javainfo)
+	if err != nil {
+		fmt.Printf("Can't insert document: %v\n", err)
+	}
+	ieinfo := getIEDetails()
+	err = collection.Insert(ieinfo)
+	if err != nil {
+		fmt.Printf("Can't insert document: %v\n", err)
+	}
 	return true
 }
 
 func DetectHostMachineInfo() bool {
+
 	hostinfo, _ := host.HostInfo()
-	fmt.Println(hostinfo)
+
 	vmem, _ := mem.VirtualMemory()
-	fmt.Println(vmem)
+
+	cpuStat := cpu.CPUInfoStat{}
 	cpuinfo, _ := cpu.CPUInfo()
-	fmt.Println(cpuinfo)
+
+	cpuStat.Cores = cpuinfo[0].Cores
+	cpuStat.CPU = cpuinfo[0].CPU
+	cpuStat.Family = cpuinfo[0].Family
+	cpuStat.Model = cpuinfo[0].Model
+	cpuStat.ModelName = cpuinfo[0].ModelName
+	cpuStat.Mhz = cpuinfo[0].Mhz
+
+	// insert
+	sess := GetConnection()
+	defer sess.Close()
+
+	collection := sess.DB("sysinfo").C("machineinfo")
+	removeErr := collection.DropCollection()
+
+	if removeErr != nil {
+		fmt.Println("problem dropping collection" + removeErr.Error())
+	}
+	err := collection.Insert(cpuStat)
+	if err != nil {
+		fmt.Printf("Can't insert cpu stat document: %v\n", err)
+	}
+	err = collection.Insert(vmem)
+	if err != nil {
+		fmt.Printf("Can't insert mem stat document: %v\n", err)
+	}
+	err = collection.Insert(hostinfo)
+	if err != nil {
+		fmt.Printf("Can't insert host stat document: %v\n", err)
+	}
 	return true
 }
 
@@ -124,4 +181,91 @@ func GetProcessInfo() bool {
 		}
 	}
 	return true
+}
+
+func getJavaDetails() *ProgramInfo {
+	cmdname := "java"
+	arg0 := "-version"
+	cmd := exec.Command(cmdname, arg0)
+	stdout, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Println("error executing wmic command" + err.Error())
+	}
+	op := string(stdout)
+	ver := strings.Split(op, "\n")[0]
+	ver = strings.Split(ver, " ")[2]
+	installed := string(ver[1 : len(ver)-1])
+	doc := ProgramInfo{}
+	doc.Name = "Java Runtime"
+	doc.ObjectId = bson.NewObjectId()
+	doc.Version = installed
+
+	resp, err := http.Get("http://java.com/applet/JreCurrentVersion2.txt")
+	if err != nil {
+		fmt.Printf("Error on http Get: %v\n", err)
+	}
+	body, _ := ioutil.ReadAll(resp.Body)
+	latest := strings.TrimSpace(string(body))
+	doc.LatestVersion = latest
+	re := regexp.MustCompile("[0-9]+")
+	insver := re.FindAllString(installed, -1)
+	f1, _ := strconv.Atoi(strings.Join(insver, ""))
+	latver := re.FindAllString(latest, -1)
+	f2, _ := strconv.Atoi(strings.Join(latver, ""))
+	doc.NeedsUpdate = f2 > f1
+	return &doc
+}
+
+func getIEDetails() *ProgramInfo {
+	keypath := `Software\Microsoft\Internet Explorer`
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, keypath, registry.READ)
+
+	if err != nil {
+		fmt.Println(err)
+	}
+	ieversion, _, _ := k.GetStringValue("Version")
+	latestIeVer, _, _ := k.GetStringValue("svcVersion")
+	doc := ProgramInfo{}
+	doc.Name = "Internet Explorer"
+	doc.ObjectId = bson.NewObjectId()
+	doc.Version = ieversion
+	a, _ := strconv.Atoi(strings.Split(ieversion, `.`)[0])
+	b, _ := strconv.Atoi(strings.Split(latestIeVer, `.`)[0])
+	if a > b {
+		doc.NeedsUpdate = false
+	} else if a < b {
+		doc.NeedsUpdate = true
+	} else {
+		c, _ := strconv.Atoi(strings.Split(ieversion, `.`)[1])
+		d, _ := strconv.Atoi(strings.Split(latestIeVer, `.`)[1])
+		if c >= d {
+			doc.NeedsUpdate = false
+		} else {
+			doc.NeedsUpdate = true
+		}
+	}
+	doc.LatestVersion = latestIeVer
+	return &doc
+}
+
+func getLatestBrowserVersion(browsername string) string {
+	resp, err := http.Get("http://www.webvakman.nl/api/recentbrowserversions")
+	if err != nil {
+		fmt.Printf("Error on http Get: %v\n", err)
+	}
+	body, _ := ioutil.ReadAll(resp.Body)
+	//fmt.Println(reflect.TypeOf(body))
+	var i map[string]interface{}
+	e := json.Unmarshal(body, &i)
+	if e != nil {
+		fmt.Println(e.Error())
+	}
+	m1 := i["BrowserList"]
+	//fmt.Println(reflect.TypeOf(m1))
+	m2 := m1.(map[string]interface{})["Windows"].(map[string]interface{})[browsername]
+	versn := m2.(map[string]interface{})["LatestVersion"]
+	v := versn.(float64)
+	var intver int = int(v)
+	stringver := strconv.Itoa(intver)
+	return stringver
 }

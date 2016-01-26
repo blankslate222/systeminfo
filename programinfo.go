@@ -5,7 +5,9 @@ import (
 )
 
 type ProgramInfo struct {
-	ObjectId bson.ObjectId `bson:"_id"`
-	Name     string        `json:"name" bson:"DisplayName"`
-	Version  string        `json:"version" bson:"DisplayVersion"`
+	ObjectId      bson.ObjectId `bson:"_id"`
+	Name          string        `json:"name" bson:"DisplayName"`
+	Version       string        `json:"version" bson:"DisplayVersion"`
+	LatestVersion string        `json:"latestversion" bson:"LatestVersion"`
+	NeedsUpdate   bool          `json:"needsupdate" bson:"NeedsUpdate"`
 }
