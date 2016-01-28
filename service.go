@@ -14,6 +14,7 @@ import (
 	"github.com/shirou/gopsutil/host"
 	"github.com/shirou/gopsutil/mem"
 	"golang.org/x/sys/windows/registry"
+	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 )
 
@@ -35,8 +36,10 @@ func DetectInstalledPrograms() bool {
 	}
 
 	sl, _ := k.ReadSubKeyNames(0)
-	sess := GetConnection()
-	defer sess.Close()
+	db := GetDB()
+	db.Lock()
+	defer db.Unlock()
+	sess := GetConnection(db)
 
 	collection := sess.DB("sysinfo").C("programs")
 	removeErr := collection.DropCollection()
@@ -87,28 +90,60 @@ func DetectInstalledPrograms() bool {
 	if err != nil {
 		fmt.Printf("Can't insert document: %v\n", err)
 	}
+	GetProcessInfo(sess)
+
+	DetectHostMachineInfo(sess)
 	return true
 }
 
-func DetectHostMachineInfo() bool {
+type VirtMem struct {
+	Available   uint64  `bson:"available virtual memory(bytes)"`
+	Total       uint64  `bson:"total virtual memory(bytes)"`
+	Used        uint64  `bson:"used up virtual memory(bytes)"`
+	UsedPercent float64 `bson:"virt mem percent used"`
+}
+type CPU struct {
+	Cores     int32   `bson:"number of cores"`
+	Family    string  `bson:"cpu family"`
+	Mhz       float64 `bson:"processor speed in mhz"`
+	Modelname string  `bson:"cpu model name"`
+}
+type HostMachine struct {
+	Hostname       string `bson:"host name"`
+	Os             string `bson:"operating system"`
+	Platform       string `bson:"platform"`
+	Platformfamily string `bson:"platform family"`
+}
+
+func DetectHostMachineInfo(sess *mgo.Session) bool {
 
 	hostinfo, _ := host.HostInfo()
+	hoststat := HostMachine{}
+
+	hoststat.Hostname = hostinfo.Hostname
+	hoststat.Os = hostinfo.OS
+	hoststat.Platform = hostinfo.Platform
+	hoststat.Platformfamily = hostinfo.PlatformFamily
 
 	vmem, _ := mem.VirtualMemory()
+	memstat := VirtMem{}
 
-	cpuStat := cpu.CPUInfoStat{}
+	memstat.Available = vmem.Available
+	memstat.Total = vmem.Total
+	memstat.Used = vmem.Used
+	memstat.UsedPercent = vmem.UsedPercent
+
+	cpuStat := CPU{}
 	cpuinfo, _ := cpu.CPUInfo()
 
 	cpuStat.Cores = cpuinfo[0].Cores
-	cpuStat.CPU = cpuinfo[0].CPU
 	cpuStat.Family = cpuinfo[0].Family
-	cpuStat.Model = cpuinfo[0].Model
-	cpuStat.ModelName = cpuinfo[0].ModelName
+	cpuStat.Modelname = cpuinfo[0].ModelName
 	cpuStat.Mhz = cpuinfo[0].Mhz
 
 	// insert
-	sess := GetConnection()
-	defer sess.Close()
+	//sess := GetConnection()
+	//defer sess.Close()
 
 	collection := sess.DB("sysinfo").C("machineinfo")
 	removeErr := collection.DropCollection()
@@ -120,18 +155,18 @@ func DetectHostMachineInfo() bool {
 	if err != nil {
 		fmt.Printf("Can't insert cpu stat document: %v\n", err)
 	}
-	err = collection.Insert(vmem)
+	err = collection.Insert(memstat)
 	if err != nil {
 		fmt.Printf("Can't insert mem stat document: %v\n", err)
 	}
-	err = collection.Insert(hostinfo)
+	err = collection.Insert(hoststat)
 	if err != nil {
 		fmt.Printf("Can't insert host stat document: %v\n", err)
 	}
 	return true
 }
 
-func GetProcessInfo() bool {
+func GetProcessInfo(sess *mgo.Session) bool {
 	// use wmic process command
 	r := regexp.MustCompile("[^\\s\\s]+")
 	name := "wmic.exe"
@@ -147,8 +182,8 @@ func GetProcessInfo() bool {
 	}
 	op := string(stdout)
 	lines := strings.Split(op, "\n")
-	sess := GetConnection()
-	defer sess.Close()
+	//sess := GetConnection()
+	//defer sess.Close()
 
 	collection := sess.DB("sysinfo").C("processes")
 	removeErr := collection.DropCollection()

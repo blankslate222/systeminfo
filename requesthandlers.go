@@ -13,8 +13,11 @@ func Index(w http.ResponseWriter, r *http.Request) {
 }
 
 func Programinfo(w http.ResponseWriter, r *http.Request) {
-	sess := GetConnection()
-	defer sess.Close()
+	fmt.Println("program info called")
+	db := GetDB()
+	db.Lock()
+	defer db.Unlock()
+	sess := GetConnection(db)
 	collection := sess.DB("sysinfo").C("programs")
 	length, _ := collection.Count()
 	result := make([]ProgramInfo, length)
@@ -32,8 +35,11 @@ func Programinfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func Processinfo(w http.ResponseWriter, r *http.Request) {
-	sess := GetConnection()
-	defer sess.Close()
+	fmt.Println("process info called")
+	db := GetDB()
+	db.Lock()
+	defer db.Unlock()
+	sess := GetConnection(db)
 	collection := sess.DB("sysinfo").C("processes")
 	length, _ := collection.Count()
 	result := make([]ProcessInfo, length)
@@ -51,8 +57,11 @@ func Processinfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func HostMachineinfo(w http.ResponseWriter, r *http.Request) {
-	sess := GetConnection()
-	defer sess.Close()
+	fmt.Println("host info called")
+	db := GetDB()
+	db.Lock()
+	defer db.Unlock()
+	sess := GetConnection(db)
 	collection := sess.DB("sysinfo").C("machineinfo")
 	length, _ := collection.Count()
 	result := make([]interface{}, length)
@@ -70,13 +79,10 @@ func HostMachineinfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func Generateinfo(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("generate info called")
 	progs := DetectInstalledPrograms()
 
-	procs := GetProcessInfo()
-
-	hostinfo := DetectHostMachineInfo()
-
-	if progs == true && procs == true && hostinfo == true {
+	if progs == true {
 		w.WriteHeader(http.StatusOK)
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)
